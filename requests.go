@@ -1,4 +1,4 @@
-package pget
+package uget
 
 import (
 	"context"
@@ -29,20 +29,18 @@ func isLastProc(i, procs uint) bool {
 }
 
 // Checking is check to can request
-func (p *Pget) Checking() error {
+func (p *Uget) Checking() error {
 
 	ctx, cancelAll := context.WithTimeout(context.Background(), time.Duration(p.timeout)*time.Second)
 
 	ch := MakeCh()
 	defer ch.Close()
-
-	for _, url := range p.URLs {
-		fmt.Fprintf(os.Stdout, "Checking now %s\n", url)
-		go p.CheckMirrors(ctx, url, ch)
-	}
+	url := "http://ahdx.down.chinaz.com/201609/DedeAMPZ_v2.0.1.zip"
+	fmt.Println("Checking now:" + url)
+	go p.CheckMirrors(ctx, url, ch)
 
 	// listen for error or size channel
-	size, err := ch.CheckingListen(ctx, cancelAll, len(p.URLs))
+	size, err := ch.CheckingListen(ctx, cancelAll, 1)
 	if err != nil {
 		return err
 	}
@@ -62,7 +60,7 @@ func (p *Pget) Checking() error {
 }
 
 // CheckMirrors method check be able to range access. also get redirected url.
-func (p *Pget) CheckMirrors(ctx context.Context, url string, ch *Ch) {
+func (p *Uget) CheckMirrors(ctx context.Context, url string, ch *Ch) {
 
 	res, err := ctxhttp.Head(ctx, http.DefaultClient, url)
 	if err != nil {
@@ -78,6 +76,7 @@ func (p *Pget) CheckMirrors(ctx context.Context, url string, ch *Ch) {
 	// To perform with the correct "range access"
 	// get the last url in the redirect
 	_url := res.Request.URL.String()
+
 	if isNotLastURL(_url, url) {
 		p.TargetURLs = append(p.TargetURLs, _url)
 	} else {
@@ -93,7 +92,7 @@ func (p *Pget) CheckMirrors(ctx context.Context, url string, ch *Ch) {
 }
 
 // Download method distributes the task to each goroutine for each URL
-func (p *Pget) Download() error {
+func (p *Uget) Download() error {
 
 	procs := uint(p.Procs)
 
@@ -130,7 +129,7 @@ func (p *Pget) Download() error {
 }
 
 // Assignment method that to each goroutine gives the task
-func (p Pget) Assignment(grp *errgroup.Group, procs, split uint) {
+func (p Uget) Assignment(grp *errgroup.Group, procs, split uint) {
 	filename := p.FileName()
 	dirname := p.DirName()
 
@@ -186,7 +185,7 @@ func (p Pget) Assignment(grp *errgroup.Group, procs, split uint) {
 }
 
 // Requests method will download the file
-func (p Pget) Requests(r Range, filename, dirname, url string) error {
+func (p Uget) Requests(r Range, filename, dirname, url string) error {
 
 	res, err := p.MakeResponse(r, url) // ctxhttp
 	if err != nil {
@@ -208,7 +207,7 @@ func (p Pget) Requests(r Range, filename, dirname, url string) error {
 }
 
 // MakeResponse return *http.Response include context and range header
-func (p Pget) MakeResponse(r Range, url string) (*http.Response, error) {
+func (p Uget) MakeResponse(r Range, url string) (*http.Response, error) {
 	// create get request
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
