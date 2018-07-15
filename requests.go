@@ -94,7 +94,7 @@ func (p *Uget) CheckMirrors(ctx context.Context, url string, ch *Ch) {
 // Download method distributes the task to each goroutine for each URL
 func (p *Uget) Download() error {
 
-	procs := uint(p.Procs)
+	procs := uint(p.Procs) * 4
 
 	filesize := p.FileSize()
 	dirname := p.DirName()
