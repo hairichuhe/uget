@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 
+	"github.com/andlabs/ui"
 	"github.com/asaskevich/govalidator" //验证器，验证strings等类型
 	"github.com/pkg/errors"
+	"github.com/tealeg/xlsx"
 )
 
 const (
@@ -36,6 +39,10 @@ type ignore struct {
 type cause interface {
 	Cause() error
 }
+
+var excelSrc = make([]string, 0)
+var cnum = make(chan int, 1) //一个协程在跑
+var pbc = make(chan int)
 
 // New for uget package
 func New() *Uget {
@@ -68,27 +75,105 @@ func (uget *Uget) Run() error {
 	//		return uget.ErrTop(err)
 	//	}
 
-	if err := uget.Checking(); err != nil {
-		return errors.Wrap(err, "failed to check header")
-	}
-
-	if err := uget.Download(); err != nil {
-		return err
-	}
-
 	//	if err := uget.Utils.BindwithFiles(uget.Procs); err != nil {
 	//		return err
 	//	}
+	if err := uget.StartGui(); err != nil {
+		return uget.ErrTop(err)
+	}
 
 	return nil
 }
 
-// Ready method define the variables required to Download.定义下载所需要的变量
-func (uget *Uget) Ready() error {
+//界面初始化
+func (uget *Uget) StartGui() error {
 	//设置可执行的最大cpu数
 	if procs := os.Getenv("GOMAXPROCS"); procs == "" {
 		runtime.GOMAXPROCS(uget.Procs)
 	}
+	err := ui.Main(func() {
+		button := ui.NewButton("请选择您的数据文件（.xlsx）")
+		filelabel := ui.NewLabel("")
+		box := ui.NewVerticalBox()
+		box.SetPadded(true)
+		box.Append(button, false)
+		box.Append(filelabel, false)
+
+		hbox := ui.NewHorizontalBox()
+		hbox.SetPadded(true)
+		templatebutton := ui.NewButton("下载模板")
+		generatebutton := ui.NewButton("开始下载")
+		hbox.Append(templatebutton, false)
+		hbox.Append(generatebutton, false)
+
+		box.Append(hbox, false)
+
+		resultlabel := ui.NewLabel("")
+		pbar := ui.NewProgressBar()
+		box.Append(resultlabel, false)
+		box.Append(pbar, false)
+		pbar.Hide()
+
+		window := ui.NewWindow("批量下载器", 600, 200, false)
+		filewindow := ui.NewWindow("请选择生成数据文件", 600, 200, false)
+		window.SetMargined(true)
+		window.SetChild(box)
+		button.OnClicked(func(*ui.Button) {
+			resultlabel.SetText("")
+			s := ui.OpenFile(filewindow)
+			if s != "" {
+				if strings.HasSuffix(s, ".xlsx") {
+					filelabel.SetText("您选择的数据文件为：" + s)
+				} else {
+					filelabel.SetText("请选择类型为xlsx的文件！")
+				}
+			}
+		})
+		templatebutton.OnClicked(func(*ui.Button) {
+			cmd := exec.Command("cmd", "/C", "start http://111.11.157.20/file/template/%E6%89%B9%E9%87%8F%E4%B8%8B%E8%BD%BD%E6%A8%A1%E6%9D%BF.xlsx")
+			cmd.Run()
+		})
+		generatebutton.OnClicked(func(*ui.Button) {
+			fls := filelabel.Text()
+			if fls == "" || fls == "请选择类型为xlsx的文件！" {
+				ui.MsgBox(window, "请选择正确的xlsx文件！", "如果不知怎么使用，请下载模板导入，如果还是不会，请加qq：14320794寻求技术指导！")
+			} else {
+				resultlabel.SetText("文件下载中…")
+				generatebutton.Disable()
+				pbar.Show()
+				flsrc := strings.Replace(fls, "您选择的数据文件为：", "", -1)
+				err1 := readExcel(flsrc)
+				if err1 == nil {
+					go uget.createxc()
+					checkProgress(func(current, total int) {
+						ui.QueueMain(func() {
+							value := int(float64(current) / float64(total) * 100.0)
+							pbar.SetValue(value)
+							if current == total {
+								resultlabel.SetText("文件下载成功!")
+								generatebutton.Enable()
+								pbar.Hide()
+							}
+						})
+					})
+				} else {
+					resultlabel.SetText("生成出错：" + err1.Error())
+					generatebutton.Enable()
+					pbar.Hide()
+				}
+			}
+		})
+		window.OnClosing(func(*ui.Window) bool {
+			ui.Quit()
+			return true
+		})
+		window.Show()
+	})
+	return err
+}
+
+// Ready method define the variables required to Download.定义下载所需要的变量
+func (uget *Uget) Ready() error {
 
 	var opts Options //命令行参数
 	if err := uget.parseOptions(&opts, os.Args[1:]); err != nil {
@@ -229,4 +314,57 @@ func (uget *Uget) parseURLs() error {
 	}
 
 	return nil
+}
+
+func readExcel(src string) error {
+	xlFile, err := xlsx.OpenFile(src)
+	if err != nil {
+		return err
+	}
+	for _, sheet := range xlFile.Sheets {
+		for i, row := range sheet.Rows {
+			if i != 0 && row.Cells[0].String() != "" {
+				excelSrc = append(excelSrc, row.Cells[0].String())
+			}
+		}
+	}
+	return nil
+}
+
+func (uget *Uget) createxc() {
+	for i := 0; i < len(excelSrc); i++ {
+		cnum <- 1
+		go uget.download(excelSrc[i])
+	}
+}
+
+func (uget *Uget) download(o string) {
+
+	//	if err := uget.Checking(); err != nil {
+	//		return errors.Wrap(err, "failed to check header")
+	//	}
+
+	//	if err := uget.Download(); err != nil {
+	//		return err
+	//	}
+	//	if err := uget.Utils.BindwithFiles(uget.Procs); err != nil {
+	//		return err
+	//	}
+	uget.Checking()
+	uget.Download()
+	uget.Utils.BindwithFiles(uget.Procs)
+
+	<-cnum
+	pbc <- 1
+}
+
+type progress func(current, total int)
+
+func checkProgress(p progress) {
+	go func() {
+		for i, _ := range excelSrc {
+			<-pbc
+			p(i+1, len(excelSrc))
+		}
+	}()
 }
